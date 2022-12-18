@@ -49,8 +49,18 @@ namespace oo
 
             return string_view(src.data() + begin, end - begin + 1);
         }
-    }
 
+        METHOD methodHit(string_view method)
+        {
+            if (method == "head")
+                return METHOD::HEAD;
+            if (method == "get")
+                return METHOD::GET;
+            if (method == "post")
+                return METHOD::POST;
+            exit(1);
+        }
+    }
     Response::~Response()
     {
         if (bodyBytes)
@@ -142,17 +152,6 @@ namespace oo
         responseByteSize = 0;
     }
 
-    METHOD methodHit(string_view method)
-    {
-        if (method == "head")
-            return METHOD::HEAD;
-        if (method == "get")
-            return METHOD::GET;
-        if (method == "post")
-            return METHOD::POST;
-        exit(1);
-    }
-
     Request::Request() {}
     Request::Request(string_view url) : url{url} {}
     Request::Request(int argc, char *argv[])
@@ -208,13 +207,17 @@ namespace oo
                 case 'c':
                 {
                     i++;
+                    // if (flag[2] == 'f')
+                    //     luaScript = new LuaScript(argv[i]);
+                    // else
                     requestCount = atoi(argv[i]);
                     break;
                 }
                 case 'm':
                 {
                     i++;
-                    method = methodHit(argv[i]);
+                    methodStr = argv[i];
+                    method = utils::methodHit(argv[i]);
                     break;
                 }
 
@@ -226,6 +229,87 @@ namespace oo
             {
                 url = flag;
             }
+        }
+    }
+
+    LuaScript::LuaScript(int argc, char *argv[])
+    {
+        for (size_t i = 1; i < argc; i++)
+        {
+            auto flag = argv[i];
+            if (flag[0] == '-')
+            {
+                switch (flag[1])
+                {
+                case 's':
+                {
+                    i++;
+                    path = argv[i];
+                }
+                }
+            }
+        }
+
+        if (!path.empty())
+        {
+            L = luaL_newstate();
+            luaL_openlibs(L);
+        }
+    }
+    LuaScript::LuaScript(string_view path) : path{path}
+    {
+        L = luaL_newstate();
+        luaL_openlibs(L);
+    }
+
+    LuaScript::~LuaScript()
+    {
+        lua_close(L);
+    }
+
+    bool LuaScript::empty()
+    {
+        return path.empty();
+    }
+
+    void LuaScript::preset(Request *request)
+    {
+        // 全局变量 request table
+        lua_newtable(L);
+
+        lua_pushstring(L, "method");
+        lua_pushstring(L, request->methodStr.data());
+        lua_settable(L, -3);
+
+        lua_pushstring(L, "url");
+        lua_pushstring(L, request->url.data());
+        lua_settable(L, -3);
+
+        lua_pushstring(L, "requestCount");
+        lua_pushinteger(L, request->requestCount);
+        lua_settable(L, -3);
+
+        lua_pushstring(L, "headers");
+        lua_newtable(L);
+
+        for (auto &&[k, v] : request->headers)
+        {
+            lua_pushstring(L, k.data());
+            lua_pushstring(L, v.data());
+            lua_settable(L, -3);
+        }
+
+        lua_settable(L, -3);
+
+        lua_setglobal(L, "request");
+    }
+
+    void LuaScript::dofile()
+    {
+        if (luaL_dofile(L, path.data()) != LUA_OK)
+        {
+            cerr << "open lua file error" << endl;
+            exit(1);
         }
     }
 
@@ -265,6 +349,11 @@ namespace oo
 
     inline void HttpClint::setUrl(string_view url)
     {
+        if (url.empty())
+        {
+            cerr << "request url empty" << endl;
+            exit(1);
+        }
         curl_easy_setopt(hCurl, CURLOPT_URL, url.data());
     }
 

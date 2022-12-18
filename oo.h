@@ -8,7 +8,14 @@
 #include <thread>
 #include <map>
 #include <chrono>
+
+extern "C"
+{
 #include <curl/curl.h>
+#include "lua.h"
+#include "lualib.h"
+#include "lauxlib.h"
+}
 
 namespace oo
 {
@@ -24,11 +31,10 @@ namespace oo
   namespace utils
   {
     string_view trim(string_view src, char ignoreChar);
+    METHOD methodHit(string_view method);
   }
 
-  METHOD methodHit(string_view method);
-
-  struct commandPart
+  struct FilePart
   {
     string_view name;
     vector<string_view> values;
@@ -38,11 +44,12 @@ namespace oo
   class Request
   {
   public:
+    string methodStr{"get"};
     METHOD method{METHOD::GET};
     string_view url;
     map<string_view, string_view> headers;
     string_view postData;
-    vector<commandPart> postMultipart;
+    vector<FilePart> postMultipart;
     uint32_t requestCount{1};
 
     bool needRespHeader{false};
@@ -83,6 +90,21 @@ namespace oo
 
   size_t responseBodyCallback(void *data, size_t size, size_t nmemb, void *userp);
   size_t responseHeaderCallback(char *buffer, size_t size, size_t nitems, void *userdata);
+
+  class LuaScript
+  {
+  private:
+    string_view path;
+    lua_State *L;
+
+  public:
+    LuaScript(string_view path);
+    LuaScript(int argc, char *argv[]);
+    ~LuaScript();
+    bool empty();
+    void preset(Request *request);
+    void dofile();
+  };
 
   class HttpClint
   {

@@ -14,11 +14,17 @@ int main(int argc, char *argv[])
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
-    // oo::Request opt{argc, argv};
-    oo::Request opt{"http://localhost:7777/ping"};
+    oo::Request request{argc, argv};
+    oo::LuaScript luaScript{argc, argv};
+    
+    if(!luaScript.empty())
+    {
+        luaScript.preset(&request);
+        luaScript.dofile();
+    }
 
     oo::runResult res;
-    if (oo::run(opt, res))
+    if (oo::run(request, res))
         return 1;
 
     fprintf(stdout, "总耗时: %.2Fs\n", res.time.count() / (double)1000.0);

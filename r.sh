@@ -6,6 +6,7 @@
 # -df <name> <string value>    post multipart
 # -dF <name> <filepath value>  post multipart 读取filepath文件后上传
 # -h <key> <value> 设置请求头
+# -s <lua script path> 设置lua脚本路径
 #
 
 # head

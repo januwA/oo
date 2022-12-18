@@ -20,9 +20,17 @@ set(BUILD_TESTING OFF)
 set(MY_CURL_DIR_NAME curl-7.86.0)
 add_subdirectory(extern/${MY_CURL_DIR_NAME})
 
-add_executable(${PROJECT_NAME} main.cpp oo.cpp)
+set(MY_LUA_DIR_NAME lua-5.4.4)
+file(GLOB LUA_SRC extern/${MY_LUA_DIR_NAME}/src/*.c)
+list(FILTER LUA_SRC EXCLUDE REGEX "luac.c$")
+list(FILTER LUA_SRC EXCLUDE REGEX "lua.c$")
 
-target_include_directories(${PROJECT_NAME} PUBLIC extern/${MY_CURL_DIR_NAME}/include)
+add_executable(${PROJECT_NAME} main.cpp oo.cpp ${LUA_SRC})
+
+target_include_directories(${PROJECT_NAME} PUBLIC 
+  extern/${MY_CURL_DIR_NAME}/include
+  extern/${MY_LUA_DIR_NAME}/src
+)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC libcurl)
 
