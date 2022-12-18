@@ -14,7 +14,8 @@ int main(int argc, char *argv[])
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
-    oo::RequestOption opt{argc, argv};
+    // oo::Request opt{argc, argv};
+    oo::Request opt{"http://localhost:7777/ping"};
 
     oo::runResult res;
     if (oo::run(opt, res))

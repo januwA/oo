@@ -15,22 +15,6 @@ std::atomic_size_t respDataCount{0};
 
 namespace oo
 {
-    namespace utils
-    {
-        string_view trim(string_view src, char ignoreChar = ' ')
-        {
-            if (src.empty())
-                return src;
-
-            auto begin = src.find_first_not_of(ignoreChar);
-            auto end = src.find_last_not_of(ignoreChar);
-
-            if (begin == string::npos || end == string::npos)
-                return string_view(src.data(), 0);
-
-            return string_view(src.data() + begin, end - begin + 1);
-        }
-    }
     /**
      * 一旦收到需要保存的数据，libcurl就会调用此回调函数
      * data 一块数据
@@ -50,205 +34,21 @@ namespace oo
         return resp->writeHeader(buffer, nitems * size);
     }
 
-    void setCurlMethod(CURL *hCurl, oo::METHOD method)
+    namespace utils
     {
-        switch (method)
+        string_view trim(string_view src, char ignoreChar = ' ')
         {
-        case oo::METHOD::HEAD:
-            curl_easy_setopt(hCurl, CURLOPT_NOBODY, 1L);
-            break;
+            if (src.empty())
+                return src;
 
-        case oo::METHOD::GET:
-            curl_easy_setopt(hCurl, CURLOPT_HTTPGET, 1L);
-            break;
+            auto begin = src.find_first_not_of(ignoreChar);
+            auto end = src.find_last_not_of(ignoreChar);
 
-        case oo::METHOD::POST:
-            curl_easy_setopt(hCurl, CURLOPT_POST, 1L);
-            break;
+            if (begin == string::npos || end == string::npos)
+                return string_view(src.data(), 0);
 
-        default:
-            cerr << "Error: setCurlMethod not match method" << endl;
-            exit(1);
-            break;
+            return string_view(src.data() + begin, end - begin + 1);
         }
-    }
-
-    void setCurlUrl(CURL *hCurl, string_view url)
-    {
-        curl_easy_setopt(hCurl, CURLOPT_URL, url.data());
-    }
-
-    struct curl_slist *setCurlHeader(CURL *hCurl, map<string_view, string_view> &headers)
-    {
-        struct curl_slist *pHeaders = nullptr;
-
-        if (!headers.empty())
-            for (auto &&[k, v] : headers)
-                pHeaders = curl_slist_append(pHeaders, (string(k) + ": " + string(v)).c_str());
-
-        if (pHeaders != nullptr)
-            curl_easy_setopt(hCurl, CURLOPT_HTTPHEADER, pHeaders);
-
-        return pHeaders;
-    }
-
-    curl_mime *setCurlBody(CURL *hCurl, oo::RequestOption &opt)
-    {
-        curl_mime *multipart = nullptr;
-
-        if (!opt.postMultipart.empty())
-        {
-            multipart = curl_mime_init(hCurl);
-
-            curl_mimepart *part = nullptr;
-
-            for (auto &&i : opt.postMultipart)
-            {
-                auto name = i.name;
-                for (auto &&value : i.values)
-                {
-                    if (i.isFilePath)
-                    {
-                        filesystem::path p{value};
-
-                        part = curl_mime_addpart(multipart);
-                        curl_mime_name(part, name.data());
-                        curl_mime_filedata(part, p.filename().string().c_str());
-
-                        FILE *file = fopen(p.string().c_str(), "rb");
-                        if (!file)
-                        {
-                            cerr << "Error: open file " << p << endl;
-                            exit(1);
-                        }
-                        curl_mime_data_cb(part, filesystem::file_size(p), (curl_read_callback)fread,
-                                          (curl_seek_callback)fseek, NULL, file);
-                    }
-                    else
-                    {
-                        part = curl_mime_addpart(multipart);
-                        curl_mime_name(part, name.data());
-                        // CURL_ZERO_TERMINATED 特殊size_t值，表示以空结尾的字符串
-                        curl_mime_data(part, value.data(), CURL_ZERO_TERMINATED);
-                    }
-                }
-            }
-
-            curl_easy_setopt(hCurl, CURLOPT_MIMEPOST, multipart);
-        }
-
-        if (!opt.postData.empty())
-        {
-            curl_easy_setopt(hCurl, CURLOPT_POSTFIELDSIZE, opt.postData.size());
-            curl_easy_setopt(hCurl, CURLOPT_POSTFIELDS, opt.postData.data());
-        }
-
-        return multipart;
-    }
-
-    void httpSend(RequestOption &opt)
-    {
-        CURL *hCurl = curl_easy_init();
-        if (!hCurl)
-        {
-            cerr << "Error: create curl null" << endl;
-            exit(1);
-        }
-
-        // set request url
-        setCurlUrl(hCurl, opt.url);
-
-        // set method
-        setCurlMethod(hCurl, opt.method);
-
-        // set header
-        // post default content-type application/x-www-form-urlencoded
-        struct curl_slist *headers = setCurlHeader(hCurl, opt.headers);
-
-        // set body
-        curl_mime *multipart = setCurlBody(hCurl, opt);
-
-        Response response{opt};
-
-        // 返回的body
-        curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, oo::responseBodyCallback);
-        curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, &response);
-
-        // 返回的headers
-        curl_easy_setopt(hCurl, CURLOPT_HEADERFUNCTION, responseHeaderCallback);
-        curl_easy_setopt(hCurl, CURLOPT_HEADERDATA, &response);
-
-        CURLcode code;
-
-        size_t _successCount{0}, _errorCount{0}, _respDataCount{0};
-
-        for (;;)
-        {
-            if (requestedCount >= opt.requestCount)
-            {
-                successCount += _successCount;
-                errorCount += _errorCount;
-                respDataCount += _respDataCount;
-
-                if (headers != nullptr)
-                    curl_slist_free_all(headers);
-
-                if (multipart != nullptr)
-                    curl_mime_free(multipart);
-
-                curl_easy_cleanup(hCurl);
-                return;
-            }
-
-            requestedCount++;
-
-            // 覆盖上一次请求返回的数据
-            response.clear();
-
-            code = curl_easy_perform(hCurl);
-            if (code)
-            {
-                errorCount++;
-                continue;
-            }
-
-            // 获取请求返回的http状态码
-            code = curl_easy_getinfo(hCurl, CURLINFO_RESPONSE_CODE, &response.statusCode);
-            if (code)
-            {
-                _errorCount++;
-                continue;
-            }
-
-            _respDataCount += response.responseByteSize;
-
-            if (response.statusCode == 200)
-                _successCount++;
-            else
-                _errorCount++;
-        }
-    }
-
-    int run(RequestOption &opt, runResult &result)
-    {
-        auto threadCount = min(max(thread::hardware_concurrency(), (uint32_t)2) - 1, opt.requestCount);
-        vector<thread> threads;
-
-        auto startDate = chrono::steady_clock ::now();
-        for (size_t i = 0; i < threadCount; i++)
-            threads.push_back(thread(oo::httpSend, ref(opt)));
-        for (auto &&i : threads)
-            i.join();
-        auto endDate = chrono::steady_clock::now();
-
-        result.time = chrono::duration_cast<chrono::milliseconds>(endDate - startDate);
-        result.threadCount = threadCount;
-        result.requestedCount = (uint32_t)requestedCount;
-        result.successCount = (uint32_t)successCount;
-        result.errorCount = (uint32_t)errorCount;
-        result.respDataCount = (size_t)respDataCount;
-
-        return 0;
     }
 
     Response::~Response()
@@ -342,18 +142,20 @@ namespace oo
         responseByteSize = 0;
     }
 
-    oo::METHOD methodHit(string_view method)
+    METHOD methodHit(string_view method)
     {
         if (method == "head")
-            return oo::METHOD::HEAD;
+            return METHOD::HEAD;
         if (method == "get")
-            return oo::METHOD::GET;
+            return METHOD::GET;
         if (method == "post")
-            return oo::METHOD::POST;
+            return METHOD::POST;
         exit(1);
     }
 
-    RequestOption::RequestOption(int argc, char *argv[])
+    Request::Request() {}
+    Request::Request(string_view url) : url{url} {}
+    Request::Request(int argc, char *argv[])
     {
         for (size_t i = 1; i < argc; i++)
         {
@@ -426,4 +228,205 @@ namespace oo
             }
         }
     }
+
+    HttpClint::HttpClint(Request &request)
+    {
+        hCurl = curl_easy_init();
+        response = new Response(request);
+
+        setUrl(request.url);
+        setMethod(request.method);
+        setHeader(request.headers);
+        setBody(request);
+
+        // 返回的body
+        curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, responseBodyCallback);
+        curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, response);
+
+        // 返回的headers
+        curl_easy_setopt(hCurl, CURLOPT_HEADERFUNCTION, responseHeaderCallback);
+        curl_easy_setopt(hCurl, CURLOPT_HEADERDATA, response);
+    }
+
+    HttpClint::~HttpClint()
+    {
+        if (response != nullptr)
+            delete response;
+
+        if (pHeaders != nullptr)
+            curl_slist_free_all(pHeaders);
+
+        if (multipart != nullptr)
+            curl_mime_free(multipart);
+
+        if (hCurl != nullptr)
+            curl_easy_cleanup(hCurl);
+    }
+
+    inline void HttpClint::setUrl(string_view url)
+    {
+        curl_easy_setopt(hCurl, CURLOPT_URL, url.data());
+    }
+
+    inline void HttpClint::setMethod(METHOD method)
+    {
+        switch (method)
+        {
+        case METHOD::HEAD:
+            curl_easy_setopt(hCurl, CURLOPT_NOBODY, 1L);
+            break;
+
+        case METHOD::GET:
+            curl_easy_setopt(hCurl, CURLOPT_HTTPGET, 1L);
+            break;
+
+        case METHOD::POST:
+            curl_easy_setopt(hCurl, CURLOPT_POST, 1L);
+            break;
+
+        default:
+            cerr << "Error: setCurlMethod not match method" << endl;
+            exit(1);
+            break;
+        }
+    }
+
+    void HttpClint::setHeader(map<string_view, string_view> &headers)
+    {
+        if (headers.empty())
+            return;
+
+        for (auto &&[k, v] : headers)
+            pHeaders = curl_slist_append(pHeaders, (string(k) + ": " + string(v)).c_str());
+
+        curl_easy_setopt(hCurl, CURLOPT_HTTPHEADER, pHeaders);
+    }
+
+    void HttpClint::setBody(Request &opt)
+    {
+        if (!opt.postMultipart.empty())
+        {
+            multipart = curl_mime_init(hCurl);
+
+            curl_mimepart *part = nullptr;
+
+            for (auto &&i : opt.postMultipart)
+            {
+                auto name = i.name;
+                for (auto &&value : i.values)
+                {
+                    if (i.isFilePath)
+                    {
+                        filesystem::path p{value};
+
+                        part = curl_mime_addpart(multipart);
+                        curl_mime_name(part, name.data());
+                        curl_mime_filedata(part, p.filename().string().c_str());
+
+                        FILE *file = fopen(p.string().c_str(), "rb");
+                        if (!file)
+                        {
+                            cerr << "Error: open file " << p << endl;
+                            exit(1);
+                        }
+                        curl_mime_data_cb(part, filesystem::file_size(p), (curl_read_callback)fread,
+                                          (curl_seek_callback)fseek, NULL, file);
+                    }
+                    else
+                    {
+                        part = curl_mime_addpart(multipart);
+                        curl_mime_name(part, name.data());
+                        // CURL_ZERO_TERMINATED 特殊size_t值，表示以空结尾的字符串
+                        curl_mime_data(part, value.data(), CURL_ZERO_TERMINATED);
+                    }
+                }
+            }
+
+            curl_easy_setopt(hCurl, CURLOPT_MIMEPOST, multipart);
+        }
+
+        if (!opt.postData.empty())
+        {
+            curl_easy_setopt(hCurl, CURLOPT_POSTFIELDSIZE, opt.postData.size());
+            curl_easy_setopt(hCurl, CURLOPT_POSTFIELDS, opt.postData.data());
+        }
+    }
+
+    inline CURLcode HttpClint::send()
+    {
+        return curl_easy_perform(hCurl);
+    }
+
+    // 清理上一次请求的返回结果
+    inline void HttpClint::clear()
+    {
+        response->clear();
+    }
+
+    inline Response *HttpClint::getResposne()
+    {
+        curl_easy_getinfo(hCurl, CURLINFO_RESPONSE_CODE, &response->statusCode);
+        return response;
+    }
+
+    void blockSend(Request &request)
+    {
+        HttpClint clint{request};
+        CURLcode code;
+        size_t _successCount{0}, _errorCount{0}, _respDataCount{0};
+
+        for (;;)
+        {
+            if (requestedCount >= request.requestCount)
+                break;
+
+            requestedCount++;
+
+            clint.clear();
+
+            code = clint.send();
+
+            if (code)
+            {
+                errorCount++;
+                continue;
+            }
+
+            auto resp = clint.getResposne();
+
+            _respDataCount += resp->responseByteSize;
+
+            if (resp->statusCode == 200)
+                _successCount++;
+            else
+                _errorCount++;
+        }
+
+        successCount += _successCount;
+        errorCount += _errorCount;
+        respDataCount += _respDataCount;
+    }
+
+    int run(Request &request, runResult &result)
+    {
+        auto threadCount = min(max(thread::hardware_concurrency(), (uint32_t)2) - 1, request.requestCount);
+        vector<thread> threads;
+
+        auto startDate = chrono::steady_clock ::now();
+        for (size_t i = 0; i < threadCount; i++)
+            threads.push_back(thread(blockSend, ref(request)));
+        for (auto &&i : threads)
+            i.join();
+        auto endDate = chrono::steady_clock::now();
+
+        result.time = chrono::duration_cast<chrono::milliseconds>(endDate - startDate);
+        result.threadCount = threadCount;
+        result.requestedCount = (uint32_t)requestedCount;
+        result.successCount = (uint32_t)successCount;
+        result.errorCount = (uint32_t)errorCount;
+        result.respDataCount = (size_t)respDataCount;
+
+        return 0;
+    }
+
 }

@@ -14,11 +14,6 @@ namespace oo
 {
   using namespace std;
 
-  namespace utils
-  {
-    string_view trim(string_view src, char ignoreChar);
-  }
-
   enum class METHOD
   {
     HEAD,
@@ -26,7 +21,12 @@ namespace oo
     POST,
   };
 
-  oo::METHOD methodHit(string_view method);
+  namespace utils
+  {
+    string_view trim(string_view src, char ignoreChar);
+  }
+
+  METHOD methodHit(string_view method);
 
   struct commandPart
   {
@@ -35,20 +35,10 @@ namespace oo
     bool isFilePath;
   };
 
-  struct runResult
-  {
-    chrono::milliseconds time;
-    uint32_t threadCount;
-    uint32_t requestedCount;
-    uint32_t successCount;
-    uint32_t errorCount;
-    size_t respDataCount;
-  };
-
-  class RequestOption
+  class Request
   {
   public:
-    oo::METHOD method{METHOD::GET};
+    METHOD method{METHOD::GET};
     string_view url;
     map<string_view, string_view> headers;
     string_view postData;
@@ -58,13 +48,15 @@ namespace oo
     bool needRespHeader{false};
     bool needBody{false};
 
-    RequestOption(int argc, char *argv[]);
+    Request();
+    Request(string_view url);
+    Request(int argc, char *argv[]);
   };
 
   class Response
   {
   private:
-    RequestOption &opt;
+    Request &opt;
 
   public:
     long statusCode;
@@ -77,7 +69,7 @@ namespace oo
     // 记录返回的字节数，通常是header+body
     size_t responseByteSize{0};
 
-    Response(RequestOption &opt) : statusCode(0), bodyBytes(0), bodySize(0), opt{opt}
+    Response(Request &opt) : statusCode(0), bodyBytes(0), bodySize(0), opt{opt}
     {
     }
     ~Response();
@@ -89,12 +81,40 @@ namespace oo
     inline void clear() noexcept;
   };
 
-  void httpSend(RequestOption &opt);
   size_t responseBodyCallback(void *data, size_t size, size_t nmemb, void *userp);
-  int run(RequestOption &opt, runResult &result);
+  size_t responseHeaderCallback(char *buffer, size_t size, size_t nitems, void *userdata);
 
-  inline void setCurlUrl(CURL *hCurl, string_view url);
-  void setCurlMethod(CURL *hCurl, oo::METHOD method);
-  struct curl_slist *setCurlHeader(CURL *hCurl, map<string_view, string_view> &headers);
-  curl_mime *setCurlBody(CURL *hCurl, oo::RequestOption &opt);
+  class HttpClint
+  {
+  private:
+    CURL *hCurl{nullptr};
+    struct curl_slist *pHeaders{nullptr};
+    curl_mime *multipart{nullptr};
+    Response *response{nullptr};
+
+  public:
+    HttpClint(Request &request);
+    ~HttpClint();
+
+    inline void setUrl(string_view url);
+    inline void setMethod(METHOD method);
+    void setHeader(map<string_view, string_view> &headers);
+    void setBody(Request &opt);
+    inline CURLcode send();
+    inline void clear();
+    inline Response *getResposne();
+  };
+
+  void blockSend(Request &request);
+
+  struct runResult
+  {
+    chrono::milliseconds time;
+    uint32_t threadCount;
+    uint32_t requestedCount;
+    uint32_t successCount;
+    uint32_t errorCount;
+    size_t respDataCount;
+  };
+  int run(Request &request, runResult &result);
 }
