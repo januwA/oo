@@ -1,5 +1,3 @@
--- request 请求的配置，如果提前在命令行已设置
-
 -- print("method:", request["method"])
 -- print("url:", request["url"])
 -- print("requestCount:", request["requestCount"])
@@ -15,7 +13,7 @@
 -- end
 
 function Preset()
-	request.method = 'post'
+	request.method = 'get'
 	-- request.data = '{"data": "json"}'
 	-- request.headers['content-type'] = 'application/json'
 	-- request.headers['X-name'] = 'ajanuw'
@@ -23,7 +21,11 @@ function Preset()
 end
 
 function Response(response)
+	-- print(response.size)
+	-- print(response.statusCode)
+	-- print(response.headers)
 	-- print(response.body.size)
-	print(response.body.text())
+	-- print(response.body.text())
+	-- print(response.body.json().name)
 	return true
 end

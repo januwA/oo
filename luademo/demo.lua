@@ -3,8 +3,8 @@
 -- print("url:", request["url"])
 -- print("requestCount:", request["requestCount"])
 
--- for k,v in pairs(request["headers"]) do
--- print(k, v)
+-- for k, v in pairs(request.headers) do
+-- 	print(k, v)
 -- end
 
 -- 在发送请求前，设置一些参数
@@ -20,11 +20,11 @@ end
 function Response(response)
 	print("Response 每个请求执行一次")
 	print("返回状态码:", response.statusCode)
-	
+
 	for k, v in pairs(response.headers) do
 		print("返回的header: " .. k .. ":" .. v)
-    end
-	
+	end
+
 	return response.statusCode == 200
 end
 

@@ -45,6 +45,53 @@ string_view trim(string_view src, char ignoreChar = ' ') {
 
   return string_view(src.data() + begin, end - begin + 1);
 }
+
+void lua_pushjson(lua_State* L, const json& data) {
+  switch (data.type()) {
+    case json::value_t::null:
+      lua_pushnil(L);
+      break;
+    case json::value_t::object: {
+      lua_newtable(L);
+      size_t i = 0;
+      for (auto& [key, value] : data.items()) {
+        lua_pushstring(L, key.c_str());
+        lua_pushjson(L, value);
+        i++;
+        lua_settable(L, -3);
+      }
+      break;
+    }
+    case json::value_t::array: {
+      lua_newtable(L);
+      size_t i = 0;
+      for (auto& element : data) {
+        lua_pushinteger(L, i);
+        lua_pushjson(L, element);
+        i++;
+        lua_settable(L, -3);
+      }
+      break;
+    }
+    case json::value_t::string:
+      lua_pushstring(L, data.get<std::string>().c_str());
+      break;
+    case json::value_t::boolean:
+      lua_pushboolean(L, data.get<bool>());
+      break;
+    case json::value_t::number_integer:
+      lua_pushinteger(L, data.get<int>());
+      break;
+    case json::value_t::number_unsigned:
+      lua_pushnumber(L, data.get<unsigned int>());
+      break;
+    case json::value_t::number_float:
+      lua_pushnumber(L, data.get<double>());
+      break;
+    default:
+      break;
+  }
+}
 }  // namespace utils
 
 Response::~Response() {
@@ -52,7 +99,7 @@ Response::~Response() {
 }
 
 size_t Response::WriteBody(uint8_t* data, size_t size) {
-  if (needBody) {
+  if (needflag & (uint8_t)NEED_FLAGS::Body) {
     size_t newSize = body.size + size;
 
     auto ptr = (uint8_t*)realloc(body.data, newSize);
@@ -63,22 +110,28 @@ size_t Response::WriteBody(uint8_t* data, size_t size) {
     body.size = newSize;
   }
 
-  responseSize += size;
+  this->size += size;
   return size;
 }
 
 size_t Response::WriteHeader(char* buffer, size_t size) {
-  if (needHeader) headerStr.append(buffer, size);
-  responseSize += size;
+  if (needflag & (uint8_t)NEED_FLAGS::Header) headerStr.append(buffer, size);
+  this->size += size;
   return size;
 }
 
 map<string_view, string_view, utils::mapComp> Response::GetHeaders() {
   map<string_view, string_view, utils::mapComp> headerMap;
-  size_t begin{0}, end{0}, count{0};
+  size_t begin{0}, end{0};
+  uint8_t err{0};
 
   auto stepFind = [&](const char c) {
     end = headerStr.find_first_of(c, begin);
+    if (end == string::npos) {
+      err = 1;
+      return std::string_view("");
+    }
+
     auto res = string_view(headerStr.data() + begin, end - begin);
     begin = end + sizeof(char);
     return res;
@@ -86,38 +139,35 @@ map<string_view, string_view, utils::mapComp> Response::GetHeaders() {
 
   // Status-Line = HTTP-Version SP Status-Code SP Reason-Phrase CRLF
   auto httpCersion = stepFind(' ');
-  if (end == string::npos) return headerMap;
+  if (err) return headerMap;
 
   auto statusCode = stepFind(' ');
-  if (end == string::npos) return headerMap;
+  if (err) return headerMap;
 
   auto reasonPhrase = stepFind('\n');
-  if (end == string::npos) return headerMap;
+  if (err) return headerMap;
 
   // Response Header Fields
   for (;;) {
-    string_view k, v;
-    k = stepFind(':');
-    if (end == string::npos) break;
+    string_view k = stepFind(':');
+    if (err) break;
 
-    v = stepFind('\n');
-    if (end == string::npos) break;
+    string_view v = stepFind('\n');
+    if (err) break;
 
-    headerMap.insert(
-        {utils::trim(utils::trim(k), '\n'), utils::trim(utils::trim(v), '\n')});
+    k = utils::trim(utils::trim(k), '\n');
+    v = utils::trim(utils::trim(v), '\n');
+
+    headerMap.insert({k, v});
   }
-
   return headerMap;
 }
 
-inline void Response::Clear() noexcept {
+inline void Response::Clear() {
   statusCode = 0;
-
   headerStr.clear();
-
   body.size = 0;
-
-  responseSize = 0;
+  size = 0;
 }
 
 Request::Request(int argc, char* argv[]) {
@@ -128,10 +178,7 @@ Request::Request(int argc, char* argv[]) {
 
     switch (flag[1]) {
       case 'h': {
-        i++;
-        auto k = argv[i], v = argv[i + 1];
-        headers.insert({k, v});
-        i++;
+        headers.insert({argv[++i], argv[++i]});
         break;
       }
       case 'd': {
@@ -161,23 +208,24 @@ Request::Request(int argc, char* argv[]) {
         break;
       }
       case 'c': {
-        i++;
-        requestCount = atoi(argv[i]);
+        requestCount = atoi(argv[++i]);
         break;
       }
       case 'm': {
-        i++;
-        methodStr = argv[i];
+        methodStr = argv[++i];
         break;
       }
       case 'u': {
-        i++;
-        url = argv[i];
+        url = argv[++i];
         break;
       }
       case 's': {
         i++;
-        scirptPath = argv[i];
+        if (strcmp(&flag[1], "sc") == 0) {
+          scirptCode = argv[i];
+        } else {
+          scirptPath = argv[i];
+        }
       }
       default:
         break;
@@ -192,24 +240,27 @@ METHOD Request::Method() {
   if (methodStr == "delete") return METHOD::Delete;
   if (methodStr == "put") return METHOD::Put;
   if (methodStr == "patch") return METHOD::Patch;
-  exit(1);
+  ::exit(1);
 }
 
-LuaScript::LuaScript(string_view path) : path{path} {
+bool Request::hasScript() {
+  return !this->scirptPath.empty() || !this->scirptCode.empty();
+}
+
+LuaScript::LuaScript(string_view path, string_view code)
+    : path{path}, code{code} {
   L = luaL_newstate();
   luaL_openlibs(L);
 }
 
 LuaScript::~LuaScript() { lua_close(L); }
 
-bool LuaScript::empty() { return path.empty(); }
-
-bool LuaScript::HasResponseCallback() {
+bool LuaScript::HasResponseFunc() {
   lua_getglobal(L, "Response");
   return lua_isfunction(L, -1) == 1;
 }
 
-bool LuaScript::HasRunDoneCallback() {
+bool LuaScript::HasRunDoneFunc() {
   lua_getglobal(L, "RunDone");
   return lua_isfunction(L, -1) == 1;
 }
@@ -227,8 +278,20 @@ int lua_bodyText(lua_State* L) {
   return 1;
 }
 
-bool LuaScript::ResponseCallback(Response* pResponse) {
-  if (!HasResponseCallback()) {
+int lua_bodyJson(lua_State* L) {
+  auto p1 = (uintptr_t*)lua_touserdata(L, lua_upvalueindex(1));
+  auto pResponse = (Response*)*p1;
+
+  json data = json::parse(
+      string_view((char*)pResponse->body.data, pResponse->body.size));
+
+  // 设置 lua 函数返回值
+  utils::lua_pushjson(L, data);
+  return 1;
+}
+
+bool LuaScript::CallResponse(Response* pResponse) {
+  if (!HasResponseFunc()) {
     cerr << "Error: "
          << "script not Response function" << endl;
     exit(1);
@@ -243,56 +306,63 @@ bool LuaScript::ResponseCallback(Response* pResponse) {
   // response.statusCode
   lua_pushstring(L, "statusCode");
   lua_pushinteger(L, pResponse->statusCode);
-  lua_settable(L, -3);
+  lua_settable(L, -3);  // set statusCode to response
 
   // response.headers
   auto _headers = pResponse->GetHeaders();
+
   lua_pushstring(L, "headers");
   lua_newtable(L);
   for (auto&& [k, v] : _headers) {
     lua_pushlstring(L, k.data(), k.size());
     lua_pushlstring(L, v.data(), v.size());
-    lua_settable(L, -3);
+    lua_settable(L, -3);  // set k/v to headers
   }
-  lua_settable(L, -3);
+  lua_settable(L, -3);  // set headers to response
 
   // response.body
   lua_pushstring(L, "body");
-  lua_newtable(L);
+  lua_newtable(L);  // new body teble
 
   // response.body.size
   lua_pushstring(L, "size");
   lua_pushinteger(L, pResponse->body.size);
-  lua_settable(L, -3);
+  lua_settable(L, -3);  // set size to body
 
   // response.body.text()
   lua_pushstring(L, "text");
-
   // 设置闭包参数为 pResponse
   // lua_pushstring(L, "闭包参数1");
   auto bp = (uintptr_t*)lua_newuserdatauv(L, sizeof(uintptr_t), 1);
   *bp = (uintptr_t)pResponse;
   lua_pushcclosure(L, lua_bodyText, 1);
-  lua_settable(L, -3);
+  lua_settable(L, -3);  // set text() to body
 
-  lua_settable(L, -3);
+  // response.body.json()
+  lua_pushstring(L, "json");
+  auto bp2 = (uintptr_t*)lua_newuserdatauv(L, sizeof(uintptr_t), 1);
+  *bp2 = (uintptr_t)pResponse;
+  lua_pushcclosure(L, lua_bodyJson, 1);
+  lua_settable(L, -3);  // set json() to body
 
-  // response.responseSize
-  lua_pushstring(L, "responseSize");
-  lua_pushinteger(L, pResponse->responseSize);
-  lua_settable(L, -3);
+  lua_settable(L, -3);  // set body to response
+
+  // response.size
+  lua_pushstring(L, "size");
+  lua_pushinteger(L, pResponse->size);
+  lua_settable(L, -3);  // set size to response
 
   // 调用函数，1个参数，1个返回值
-  lua_call(L, 1, 1);
+  lua_call(L, 1, 1);  // call lua Response function
 
   // 获取返回值
-  auto ok = lua_toboolean(L, -1);
+  auto ok = lua_toboolean(L, -1);  // get lua Response function return value
 
   return ok;
 }
 
-void LuaScript::RunDoneCallback(RunResult* result) {
-  if (!HasRunDoneCallback()) {
+void LuaScript::CallRunDone(RunResult* result) {
+  if (!HasRunDoneFunc()) {
     cerr << "Error: "
          << "script not RunDone function" << endl;
     exit(1);
@@ -407,20 +477,22 @@ void LuaScript::PresetRequestVariable(Request* pRequest) {
   lua_setglobal(L, "request");
 }
 
-void LuaScript::PresetDofile(Request* request) {
-  // 加载脚本文件
-  if (luaL_dofile(L, path.data()) != LUA_OK) {
-    cerr << "open lua file error" << endl;
+void LuaScript::PresetDoScript(Request* request) {
+  if (!code.empty() && luaL_dostring(L, code.data()) != LUA_OK) {
+    cerr << "load lua code error" << endl;
+    exit(1);
+  }
+
+  if (!path.empty() && luaL_dofile(L, path.data()) != LUA_OK) {
+    cerr << "load lua file error" << endl;
     exit(1);
   }
 }
 
 void LuaScript::PresetResponse(Request* pRequest) {
-  // 如果脚本要处理response
-  if (HasResponseCallback()) {
-    pRequest->needRespHeader = true;
-    pRequest->needRespBody = true;
-  }
+  if (!HasResponseFunc()) return;
+  pRequest->needflag |= (uint8_t)NEED_FLAGS::Header;
+  pRequest->needflag |= (uint8_t)NEED_FLAGS::Body;
 }
 
 void LuaScript::PresetPreset(Request* pRequest) {
@@ -433,29 +505,34 @@ void LuaScript::PresetPreset(Request* pRequest) {
   // 读取requst变化
   lua_getglobal(L, "request");
 
+  // get request.method
   lua_pushstring(L, "method");
   lua_gettable(L, -2);
-  auto _methodStr = lua_tostring(L, -1);
+  pRequest->methodStr = lua_tostring(L, -1);
   lua_pop(L, 1);
 
+  // get request.url
   lua_pushstring(L, "url");
   lua_gettable(L, -2);
-  auto _url = lua_tostring(L, -1);
+  pRequest->url = lua_tostring(L, -1);
   lua_pop(L, 1);
 
+  // get request.requestCount
   lua_pushstring(L, "requestCount");
   lua_gettable(L, -2);
-  auto _requestCount = lua_tointeger(L, -1);
+  pRequest->requestCount = (uint32_t)lua_tointeger(L, -1);
   lua_pop(L, 1);
 
+  // get request.data
   lua_pushstring(L, "data");
   lua_gettable(L, -2);
-  auto _data = lua_tostring(L, -1);
+  pRequest->data = lua_tostring(L, -1);
   lua_pop(L, 1);
 
+  // get request.headers
   lua_pushstring(L, "headers");
   lua_gettable(L, -2);
-  // 遍历header table
+  // 遍历header k/v table
   lua_pushnil(L);
   while (lua_next(L, -2) != 0) {
     /* uses 'key' (at index -2) and 'value' (at index -1) */
@@ -476,30 +553,61 @@ void LuaScript::PresetPreset(Request* pRequest) {
   }
   lua_pop(L, 1);
 
-  // TODO: multipart
+  // get request.multipart
+  lua_pushstring(L, "multipart");
+  lua_gettable(L, -2);
+  lua_pushnil(L);
+  while (lua_next(L, -2) != 0) {
+    FilePart p;
+    /* uses 'key' (at index -2) and 'value' (at index -1) */
+    // auto i = lua_tointeger(L, -2);
+    // cout << "index: " << i << endl;
 
-  pRequest->methodStr = _methodStr;
-  pRequest->url = _url;
-  pRequest->requestCount = (uint32_t)_requestCount;
-  pRequest->data = _data;
+    // get item value
+    lua_pushstring(L, "name");
+    lua_gettable(L, -2);
+    p.name = lua_tostring(L, -1);
+    lua_pop(L, 1);  // pop name
+
+    lua_pushstring(L, "isFilePath");
+    lua_gettable(L, -2);
+    p.isFilePath = lua_toboolean(L, -1);
+    lua_pop(L, 1);  // pop isFilePath
+
+    lua_pushstring(L, "values");
+    lua_gettable(L, -2);
+    // each values
+    lua_pushnil(L);
+    while (lua_next(L, -2) != 0) {
+      auto it = lua_tostring(L, -1);
+      // cout << "values it: " << it << endl;
+      p.values.push_back(it);
+      lua_pop(L, 1);
+    }
+    lua_pop(L, 1);  // pop values
+
+    pRequest->multipart.push_back(p);
+    /* removes 'value'; keeps 'key' for next iteration */
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
 }
 
-void LuaScript::Preset(Request* request) {
-  PresetRequestVariable(request);
-  PresetDofile(request);
-  PresetResponse(request);
-  PresetPreset(request);
+void LuaScript::Preset(Request* pRequest) {
+  PresetRequestVariable(pRequest);
+  PresetDoScript(pRequest);
+  PresetResponse(pRequest);
+  PresetPreset(pRequest);
 }
 
 LuaScript* LuaScript::Copy() {
-  auto c = new LuaScript(path);
-
+  auto c = new LuaScript(path, code);
   return c;
 }
 
 HttpClint::HttpClint(Request* pRequest) : pRequest{pRequest} {
   hCurl = curl_easy_init();
-  pResponse = new Response(pRequest->needRespHeader, pRequest->needRespBody);
+  pResponse = new Response(pRequest->needflag);
 
   SetUrl();
   SetMethod();
@@ -531,6 +639,8 @@ inline void HttpClint::SetUrl() {
     exit(1);
   }
   curl_easy_setopt(hCurl, CURLOPT_URL, pRequest->url.data());
+  curl_easy_setopt(hCurl, CURLOPT_SSL_VERIFYPEER, 0L);
+  curl_easy_setopt(hCurl, CURLOPT_SSL_VERIFYHOST, 0L);
 }
 
 inline void HttpClint::SetMethod() {
@@ -639,11 +749,16 @@ inline Response* HttpClint::GetResponsePtr() {
 }
 
 void blockHttpSend(Request* pRequest, LuaScript* pLuaScript) {
-  LuaScript* _luaScript{nullptr};
+  LuaScript* copyLuaScript{nullptr};
 
-  if (pLuaScript != nullptr && pLuaScript->HasResponseCallback()) {
-    _luaScript = pLuaScript->Copy();
-    _luaScript->PresetDofile(pRequest);
+  bool hasRespFunc = false;
+
+  if (pLuaScript != nullptr && pLuaScript->HasResponseFunc()) {
+    copyLuaScript = pLuaScript->Copy();
+    copyLuaScript->PresetRequestVariable(pRequest);
+    copyLuaScript->PresetDoScript(pRequest);
+
+    hasRespFunc = copyLuaScript->HasResponseFunc();
   }
 
   HttpClint clint{pRequest};
@@ -662,11 +777,11 @@ void blockHttpSend(Request* pRequest, LuaScript* pLuaScript) {
     }
 
     auto pResp = clint.GetResponsePtr();
-    _respDataCount += pResp->responseSize;
+    _respDataCount += pResp->size;
 
-    bool isSuccess = _luaScript != nullptr && _luaScript->HasResponseCallback()
-                         ? _luaScript->ResponseCallback(pResp)
-                         : pResp->statusCode == 200;
+    bool isSuccess = hasRespFunc
+                         ? copyLuaScript->CallResponse(pResp)
+                         : (uint8_t)(pResp->statusCode / 100) == (uint8_t)2;
 
     if (isSuccess)
       _successCount++;
@@ -678,14 +793,14 @@ void blockHttpSend(Request* pRequest, LuaScript* pLuaScript) {
   errorCount += _errorCount;
   respDataCount += _respDataCount;
 
-  if (_luaScript != nullptr) delete _luaScript;
+  if (copyLuaScript != nullptr) delete copyLuaScript;
 }
 
 int run(Request* pRequest, RunResult* pResult) {
   LuaScript* pLuaScript{nullptr};
 
-  if (!pRequest->scirptPath.empty()) {
-    pLuaScript = new LuaScript(pRequest->scirptPath);
+  if (pRequest->hasScript()) {
+    pLuaScript = new LuaScript(pRequest->scirptPath, pRequest->scirptCode);
     pLuaScript->Preset(pRequest);
   }
 
@@ -707,9 +822,9 @@ int run(Request* pRequest, RunResult* pResult) {
   pResult->errorCount = (uint32_t)errorCount;
   pResult->respDataCount = (size_t)respDataCount;
 
-  if (pLuaScript != nullptr && pLuaScript->HasRunDoneCallback()) {
+  if (pLuaScript != nullptr && pLuaScript->HasRunDoneFunc()) {
     pResult->hasRunDone = true;
-    pLuaScript->RunDoneCallback(pResult);
+    pLuaScript->CallRunDone(pResult);
   }
 
   if (pLuaScript != nullptr) delete pLuaScript;

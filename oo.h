@@ -1,14 +1,17 @@
 #pragma once
 
 #include <string.h>
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+using json = nlohmann::json;
 
 extern "C" {
 #include <curl/curl.h>
@@ -30,8 +33,14 @@ enum class METHOD {
   Patch,
 };
 
+enum class NEED_FLAGS {
+  Header = 1 << 0,
+  Body = 1 << 1,
+};
+
 namespace utils {
 string_view trim(string_view src, char ignoreChar);
+void lua_pushjson(lua_State* L, const json& data);
 
 struct mapComp {
   bool operator()(string_view lhs, string_view rhs) const {
@@ -53,6 +62,7 @@ struct FilePart {
 class Request {
  public:
   string_view scirptPath;
+  string_view scirptCode;
   string methodStr{"get"};
   string_view url;
   map<string_view, string_view, utils::mapComp> headers;
@@ -60,13 +70,14 @@ class Request {
   vector<FilePart> multipart;
   uint32_t requestCount{1};
 
-  bool needRespHeader{false};
-  bool needRespBody{false};
+  uint8_t needflag{0};
 
   Request() = default;
   Request(int argc, char* argv[]);
 
   METHOD Method();
+
+  bool hasScript();
 };
 
 struct Body {
@@ -76,23 +87,22 @@ struct Body {
 
 class Response {
  public:
-  bool needHeader{false};
-  bool needBody{false};
+  uint8_t needflag;
 
   long statusCode{0};
   string headerStr;
   Body body;
-  size_t responseSize{0};
+
+  size_t size{0};  // response size (Status-Line size + header size + body size)
 
   Response() = default;
-  Response(bool needHeader, bool needBody)
-      : needHeader{needHeader}, needBody{needBody} {}
+  Response(uint8_t needflag) : needflag{needflag} {}
   ~Response();
 
   size_t WriteBody(uint8_t* data, size_t size);
   size_t WriteHeader(char* buffer, size_t size);
   map<string_view, string_view, utils::mapComp> GetHeaders();
-  inline void Clear() noexcept;
+  inline void Clear();
 };
 
 size_t curlRespBodyCallback(void* data, size_t size, size_t nmemb, void* userp);
@@ -112,21 +122,21 @@ struct RunResult {
 class LuaScript {
  private:
   string_view path;
+  string_view code;
   lua_State* L;
 
  public:
-  LuaScript(string_view path);
+  LuaScript(string_view path, string_view code);
   ~LuaScript();
-  bool empty();
   void PresetRequestVariable(Request* pRequest);
-  void PresetDofile(Request* pRequest);
+  void PresetDoScript(Request* pRequest);
   void PresetResponse(Request* pRequest);
   void PresetPreset(Request* pRequest);
   void Preset(Request* pRequest);
-  bool HasResponseCallback();
-  bool HasRunDoneCallback();
-  void RunDoneCallback(RunResult* pResult);
-  bool ResponseCallback(Response* pResponse);
+  bool HasResponseFunc();
+  bool HasRunDoneFunc();
+  void CallRunDone(RunResult* pResult);
+  bool CallResponse(Response* pResponse);
   LuaScript* Copy();
 };
 
