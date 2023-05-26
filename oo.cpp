@@ -641,6 +641,10 @@ inline void HttpClint::SetUrl() {
   curl_easy_setopt(hCurl, CURLOPT_URL, pRequest->url.data());
   curl_easy_setopt(hCurl, CURLOPT_SSL_VERIFYPEER, 0L);
   curl_easy_setopt(hCurl, CURLOPT_SSL_VERIFYHOST, 0L);
+  curl_easy_setopt(hCurl, CURLOPT_SSL_VERIFYSTATUS, 0L);
+  curl_easy_setopt(hCurl, CURLOPT_DOH_SSL_VERIFYPEER, 0L);
+  curl_easy_setopt(hCurl, CURLOPT_DOH_SSL_VERIFYHOST, 0L);
+  curl_easy_setopt(hCurl, CURLOPT_DOH_SSL_VERIFYSTATUS, 0L);
 }
 
 inline void HttpClint::SetMethod() {
@@ -772,6 +776,7 @@ void blockHttpSend(Request* pRequest, LuaScript* pLuaScript) {
 
     code = clint.Send();
     if (code) {
+      // std::cout << "Clint Send Error: " << code << std::endl;
       errorCount++;
       continue;
     }

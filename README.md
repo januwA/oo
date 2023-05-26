@@ -5,6 +5,7 @@ $ git clone git@github.com:januwA/oo.git
 $ cd oo
 $ cmake -DCMAKE_BUILD_TYPE=Release -S . -B build
 $ cmake --build build --config Release
+$ ls build/dist
 ```
 
 ```
