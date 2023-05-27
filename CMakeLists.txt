@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(USE_CMD "build oocmd" ON)
+option(USE_HTTPS "use https" OFF)
+
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8") 
@@ -17,16 +19,19 @@ endif()
 # curl build
 set(BUILD_CURL_EXE OFF)
 set(BUILD_TESTING OFF)
-set(CURL_ENABLE_SSL ON) # 开启https
-set(CURL_USE_OPENSSL ON) # 使用openssl
+set(CURL_ENABLE_SSL OFF)
+set(CURL_USE_OPENSSL OFF)
 set(HTTP_ONLY ON)
 
-# windows上设置openssl变量，linux上安装openssl即可
-if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-   set(OPENSSL_ROOT_DIR "D:\\program\\OpenSSL-Win64") 
-   set(OPENSSL_LIBRARIES "D:\\program\\OpenSSL-Win64\\lib") 
-   set(OPENSSL_INCLUDE_DIR "D:\\program\\OpenSSL-Win64\\include") 
-endif()
+if(USE_HTTPS)
+  set(CURL_ENABLE_SSL ON)
+  set(CURL_USE_OPENSSL ON)
+
+  if(CMAKE_SYSTEM_NAME MATCHES "Windows")
+    set(OPENSSL_LIBRARIES "${OPENSSL_ROOT_DIR}/lib") 
+    set(OPENSSL_INCLUDE_DIR "${OPENSSL_ROOT_DIR}/include") 
+  endif()
+endif(USE_HTTPS)
 
 set(MY_CURL_DIR_NAME curl-7.86.0)
 add_subdirectory(extern/${MY_CURL_DIR_NAME})
@@ -84,8 +89,8 @@ add_custom_command(TARGET ${MY_shared_name} POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:libcurl>" "${PROJECT_BINARY_DIR}/dist/"
 )
 
-# copy dll
-if(CMAKE_SYSTEM_NAME MATCHES "Windows")
+# copy openssl dll
+if(USE_HTTPS AND CMAKE_SYSTEM_NAME MATCHES "Windows")
    add_custom_command(TARGET ${MY_shared_name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/dist/"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENSSL_ROOT_DIR}/libcrypto-1_1-x64.dll" "${PROJECT_BINARY_DIR}/dist/"
@@ -97,8 +102,6 @@ endif()
 if(USE_CMD)
   set(oocmd_PROJECT_NAME "oocmd")
   add_executable(${oocmd_PROJECT_NAME} oocmd.cpp)
-
-  # oocmd include
   target_include_directories(${oocmd_PROJECT_NAME} PUBLIC oo.h)
 
   set(link_LIBS oo)
@@ -107,7 +110,6 @@ if(USE_CMD)
   endif()
   target_link_libraries(${oocmd_PROJECT_NAME} PUBLIC ${link_LIBS})
 
-  # copy exe to build/dist
   add_custom_command(TARGET ${oocmd_PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/dist/"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${oocmd_PROJECT_NAME}>" "${PROJECT_BINARY_DIR}/dist/"

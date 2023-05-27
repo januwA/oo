@@ -8,6 +8,13 @@ $ cmake --build build --config Release
 $ ls build/dist
 ```
 
+## suport https
+```sh
+$ cmake -DCMAKE_BUILD_TYPE=Release -DUSE_HTTPS=ON -DOPENSSL_ROOT_DIR="D:\\program\\OpenSSL-Win64" -S . -B build
+$ cmake --build build --config Release
+```
+
+## options
 ```
 -c  <int>
   set http send count
@@ -39,15 +46,15 @@ $ ls build/dist
 
 http post
 ```sh
-$ oo -m post -u http://localhost -d 'id=1&name=oo'
+oocmd -m post -u http://localhost -d 'id=1&name=oo'
 ```
 
 http post send file
 ```sh
-$ oo -m post -u http://localhost -dF files "a.jpg" -dF files "b.jpg"
+oocmd -m post -u http://localhost -dF files "a.jpg" -dF files "b.jpg"
 ```
 
 use lua script
 ```sh
-oo -s ./luademo/demo2.lua
+oocmd -s ./luademo/demo2.lua
 ```
