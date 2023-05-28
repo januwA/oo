@@ -41,74 +41,60 @@ set(MY_LUA_DIR_NAME lua-5.4.4)
 file(GLOB LUA_LIB_SRC extern/${MY_LUA_DIR_NAME}/src/*.c)
 list(FILTER LUA_LIB_SRC EXCLUDE REGEX "lua.c$" )
 
-add_library(lua_static STATIC ${LUA_LIB_SRC})
-set_target_properties(lua_static PROPERTIES OUTPUT_NAME "lua")
-set_target_properties(lua_static PROPERTIES CLEAN_DIRECT_OUTPUT 1)
-
-add_library(lua_shared SHARED  ${LUA_LIB_SRC})
-set_target_properties(lua_shared PROPERTIES OUTPUT_NAME "lua")
-set_target_properties(lua_shared PROPERTIES CLEAN_DIRECT_OUTPUT 1)
+add_library(liblua STATIC ${LUA_LIB_SRC})
+set_target_properties(liblua PROPERTIES OUTPUT_NAME "lua")
+set_target_properties(liblua PROPERTIES CLEAN_DIRECT_OUTPUT 1)
 
 # oo
-set(libs_SRC oo.cpp)
-
-# 静态库
-set(MY_static_name oo)
-add_library(${MY_static_name} STATIC ${libs_SRC})
-set_target_properties(${MY_static_name} PROPERTIES OUTPUT_NAME "oo")
-set_target_properties(${MY_static_name} PROPERTIES CLEAN_DIRECT_OUTPUT 1)
-
-# 共享库
-set(MY_shared_name oo_shared)
-add_library(${MY_shared_name} SHARED ${libs_SRC})
-set_target_properties(${MY_shared_name} PROPERTIES OUTPUT_NAME "oo")
-set_target_properties(${MY_shared_name} PROPERTIES CLEAN_DIRECT_OUTPUT 1)
+set(oo_STATIC liboo)
+add_library(${oo_STATIC} STATIC oo.cpp)
+set_target_properties(${oo_STATIC} PROPERTIES OUTPUT_NAME "oo")
+set_target_properties(${oo_STATIC} PROPERTIES CLEAN_DIRECT_OUTPUT 1)
 
 # include
-set(MY_includes 
+set(oo_INCLUDES 
   extern/${MY_CURL_DIR_NAME}/include
   extern/${MY_LUA_DIR_NAME}/src
   extern/json-3.11.2/include)
-target_include_directories(${MY_static_name} PUBLIC ${MY_includes})
-target_include_directories(${MY_shared_name} PUBLIC ${MY_includes})
+target_include_directories(${oo_STATIC} PUBLIC ${oo_INCLUDES})
 
 # link
-set(link_LIBS libcurl lua_static)
+set(oo_LINKS libcurl liblua)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  list(APPEND link_LIBS stdc++fs)
+  list(APPEND oo_LINKS stdc++fs)
 endif()
-target_link_libraries(${MY_static_name} PUBLIC ${link_LIBS})
-target_link_libraries(${MY_shared_name} PUBLIC ${link_LIBS})
+target_link_libraries(${oo_STATIC} PUBLIC ${oo_LINKS})
 
-add_custom_command(TARGET ${MY_shared_name} POST_BUILD
+add_custom_command(TARGET ${oo_STATIC} POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/dist/"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${MY_static_name}>" "${PROJECT_BINARY_DIR}/dist/"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${MY_shared_name}>" "${PROJECT_BINARY_DIR}/dist/"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:lua_static>" "${PROJECT_BINARY_DIR}/dist/"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:lua_shared>" "${PROJECT_BINARY_DIR}/dist/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${oo_STATIC}>" "${PROJECT_BINARY_DIR}/dist/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:liblua>" "${PROJECT_BINARY_DIR}/dist/"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:libcurl>" "${PROJECT_BINARY_DIR}/dist/"
 )
 
 # copy openssl dll
 if(USE_HTTPS AND CMAKE_SYSTEM_NAME MATCHES "Windows")
-   add_custom_command(TARGET ${MY_shared_name} POST_BUILD
+   file(GLOB libcrypto_DLL "${OPENSSL_ROOT_DIR}/libcrypto*.dll")
+   file(GLOB libssl_DLL "${OPENSSL_ROOT_DIR}/libssl*.dll")
+
+   add_custom_command(TARGET ${oo_STATIC} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/dist/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENSSL_ROOT_DIR}/libcrypto-1_1-x64.dll" "${PROJECT_BINARY_DIR}/dist/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENSSL_ROOT_DIR}/libssl-1_1-x64.dll" "${PROJECT_BINARY_DIR}/dist/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${libcrypto_DLL}" "${PROJECT_BINARY_DIR}/dist/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${libssl_DLL}" "${PROJECT_BINARY_DIR}/dist/"
   )
 endif()
 
 # oocmd exe
 if(USE_CMD)
-  set(oocmd_PROJECT_NAME "oocmd")
+  set(oocmd_PROJECT_NAME "oo")
   add_executable(${oocmd_PROJECT_NAME} oocmd.cpp)
   target_include_directories(${oocmd_PROJECT_NAME} PUBLIC oo.h)
 
-  set(link_LIBS oo)
+  set(oocmd_LINKS ${oo_STATIC})
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    list(APPEND link_LIBS stdc++fs)
+    list(APPEND oocmd_LINKS stdc++fs)
   endif()
-  target_link_libraries(${oocmd_PROJECT_NAME} PUBLIC ${link_LIBS})
+  target_link_libraries(${oocmd_PROJECT_NAME} PUBLIC ${oocmd_LINKS})
 
   add_custom_command(TARGET ${oocmd_PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/dist/"

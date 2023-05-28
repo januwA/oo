@@ -9,9 +9,21 @@ $ ls build/dist
 ```
 
 ## suport https
+
+### windows
+
+[Downlaod OpenSSL-Win64](https://slproweb.com/products/Win32OpenSSL.html)
+
 ```sh
-$ cmake -DCMAKE_BUILD_TYPE=Release -DUSE_HTTPS=ON -DOPENSSL_ROOT_DIR="D:\\program\\OpenSSL-Win64" -S . -B build
-$ cmake --build build --config Release
+cmake -DCMAKE_BUILD_TYPE=Release -DUSE_HTTPS=ON -DOPENSSL_ROOT_DIR="D:\\program\\OpenSSL-Win64" -S . -B build
+cmake --build build --config Release
+```
+
+### ubuntu
+```sh
+sudo apt-get install libssl-dev
+cmake -DCMAKE_BUILD_TYPE=Release -DUSE_HTTPS=ON -S . -B build
+cmake --build build --config Release
 ```
 
 ## options
@@ -46,15 +58,15 @@ $ cmake --build build --config Release
 
 http post
 ```sh
-oocmd -m post -u http://localhost -d 'id=1&name=oo'
+oo -m post -u http://localhost -d 'id=1&name=oo'
 ```
 
 http post send file
 ```sh
-oocmd -m post -u http://localhost -dF files "a.jpg" -dF files "b.jpg"
+oo -m post -u http://localhost -dF files "a.jpg" -dF files "b.jpg"
 ```
 
 use lua script
 ```sh
-oocmd -s ./luademo/demo2.lua
+oo -s ./luademo/demo2.lua
 ```
